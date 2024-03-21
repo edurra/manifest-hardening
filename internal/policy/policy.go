@@ -7,4 +7,7 @@ type Policy struct {
 	Privileged bool
 	HostProcess bool
 	Capabilities []string
+	HostPath bool
+	ProcMount string
+	Seccomp []string
 }

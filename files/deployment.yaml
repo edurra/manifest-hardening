@@ -14,15 +14,23 @@ spec:
       labels:
         app: sample-web-app
     spec:
+      volumes:
+      - name: hostpath-volume
+        hostPath:
+          path: /host/path
+      - name: emptydir-volume
+        emptyDir: {}
       hostNetwork: true
       securityContext:
         runAsUser: 1000
+        seccompProfile:
+          type: Unconfined
         windowsOptions:
             hostProcess: true
-      initContainers:                    # Add initContainers section here
-      - name: init-container             # Name of the init container
-        image: busybox:1.32.0            # Image for the init container
-        command: ["sh", "-c", "echo Init Container is running"]  # Command for the init container
+      initContainers:                 
+      - name: init-container
+        image: busybox:1.32.0
+        command: ["sh", "-c", "echo Init Container is running"]
         securityContext:
           privileged: true
       containers:

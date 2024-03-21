@@ -48,17 +48,17 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	}
 
 	if ps.HostPID != pol.HostPID {
-		fmt.Println("hostPID does not match")
+		fmt.Printf("hostPID does not match. Setting it to %v. \n", pol.HostPID)
 		ps.HostPID = pol.HostPID
 	}
 
 	if ps.HostNetwork != pol.HostNetwork {
-		fmt.Println("hostNetwork does not match")
+		fmt.Printf("hostNetwork does not match. Setting it to %v. \n", pol.HostNetwork)
 		ps.HostNetwork = pol.HostNetwork
 	}
 
 	if ps.HostIPC != pol.HostIPC {
-		fmt.Println("hostIPC does not match")
+		fmt.Printf("hostIPC does not match. Setting it to %v. \n", pol.HostIPC)
 		ps.HostIPC = pol.HostIPC
 	}
 
@@ -66,7 +66,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		newVolumes := []corev1.Volume{}
 		for _, volume := range(ps.Volumes) {
 			if volume.HostPath != nil && pol.HostPath == false {
-				fmt.Println("HostPath Volume")
+				fmt.Printf("HostPath Volume detected. It has been deleted.\n")
 			} else {
 				newVolumes = append(newVolumes, volume)
 			}
@@ -78,7 +78,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	if ps.SecurityContext.WindowsOptions != nil {
 		if ps.SecurityContext.WindowsOptions.HostProcess != nil {
 			if *ps.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
-				fmt.Println("Host process does not match")
+				fmt.Printf("Host process does not match in pod security context. Setting it to %v.", pol.HostProcess)
 				*ps.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 			}
 		}
@@ -111,7 +111,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 
 	if ps.SecurityContext.SeccompProfile != nil {
 		if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
-			fmt.Println("Seccomp does not match")
+			fmt.Printf("Seccomp does not match in pod security context. Setting it to %v. \n", pol.Seccomp[0])
 			ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
 		}
 	}
@@ -133,7 +133,7 @@ func assessPrivileged(containers []corev1.Container, pol policy.Policy) ([]corev
 		}
 		if container.SecurityContext.Privileged != nil {
 			if *container.SecurityContext.Privileged != pol.Privileged {
-				fmt.Println("Privileged does not match")
+				fmt.Printf("Privileged does not match in container %v. Setting it to %v.\n", container.Name, pol.Privileged)
 				*container.SecurityContext.Privileged = pol.Privileged
 			}
 		}	
@@ -149,7 +149,7 @@ func assessHostProcess(containers []corev1.Container, pol policy.Policy) ([]core
 		if container.SecurityContext.WindowsOptions != nil {
 			if container.SecurityContext.WindowsOptions.HostProcess != nil {
 				if *container.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
-					fmt.Println("HostProcess does not match")
+					fmt.Printf("HostProcess does not match in container %v. Setting it to %v.\n", container.Name, pol.HostProcess)
 					*container.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 				}
 			}	
@@ -170,7 +170,7 @@ func assessCapabilities(containers []corev1.Container, pol policy.Policy) ([]cor
 					if utils.ContainsValue(pol.Capabilities, string(capability)) {
 						newCapabilities = append(newCapabilities, capability)
 					} else {
-						fmt.Printf("Droped capability: %v \n", string(capability))
+						fmt.Printf("Droped capability: %v in container %v.\n", string(capability), container.Name)
 					}
 				}
 				container.SecurityContext.Capabilities.Add = newCapabilities
@@ -187,7 +187,7 @@ func assessProcMount(containers []corev1.Container, pol policy.Policy) ([]corev1
 		}
 		if container.SecurityContext.ProcMount != nil {
 			if *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) {
-				fmt.Println("ProcMount does not match")
+				fmt.Println("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount)
 				*container.SecurityContext.ProcMount  = corev1.ProcMountType(pol.ProcMount) 
 			}
 		}
@@ -202,7 +202,7 @@ func assessSeccomp(containers []corev1.Container, pol policy.Policy) ([]corev1.C
 		}
 		if container.SecurityContext.SeccompProfile != nil {
 			if !utils.ContainsValue(pol.Seccomp, string(container.SecurityContext.SeccompProfile.Type)) {
-				fmt.Println("Seccomp does not match")
+				fmt.Println("Seccomp does not match in container %v. Setting it to %v.\n", container.Name, pol.Seccomp[0])
 				container.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
 			}
 		

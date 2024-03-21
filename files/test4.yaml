@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    app: sample-web-app
+  name: sample-web-app-pod
+spec:
+  containers:
+  - image: your-docker-username/sample-web-app:latest
+    name: web
+    ports:
+    - containerPort: 80
+    resources: {}
+    securityContext:
+      capabilities:
+        add:
+        - CHOWN
+      privileged: false
+  - image: your-docker-username/test:latest
+    name: web222
+    ports:
+    - containerPort: 811
+    resources: {}
+    securityContext:
+      privileged: false
+      windowsOptions:
+        hostProcess: false
+  hostNetwork: true
+  initContainers:
+  - command:
+    - sh
+    - -c
+    - echo Init Container is running
+    image: busybox:1.32.0
+    name: init-container
+    resources: {}
+    securityContext:
+      privileged: false
+  securityContext:
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+    windowsOptions:
+      hostProcess: false
+  volumes:
+  - emptyDir: {}
+    name: emptydir-volume
+status: {}

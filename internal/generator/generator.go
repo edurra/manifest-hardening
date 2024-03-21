@@ -47,17 +47,17 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		ps.SecurityContext = &corev1.PodSecurityContext{}
 	}
 
-	if ps.HostPID != pol.HostPID {
+	if pol.HostPID == false && ps.HostPID != pol.HostPID {
 		fmt.Printf("hostPID does not match. Setting it to %v. \n", pol.HostPID)
 		ps.HostPID = pol.HostPID
 	}
 
-	if ps.HostNetwork != pol.HostNetwork {
+	if pol.HostNetwork == false && ps.HostNetwork != pol.HostNetwork {
 		fmt.Printf("hostNetwork does not match. Setting it to %v. \n", pol.HostNetwork)
 		ps.HostNetwork = pol.HostNetwork
 	}
 
-	if ps.HostIPC != pol.HostIPC {
+	if pol.HostIPC == false && ps.HostIPC != pol.HostIPC {
 		fmt.Printf("hostIPC does not match. Setting it to %v. \n", pol.HostIPC)
 		ps.HostIPC = pol.HostIPC
 	}
@@ -77,7 +77,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	// Assess hostProcess for PodSecurityContext
 	if ps.SecurityContext.WindowsOptions != nil {
 		if ps.SecurityContext.WindowsOptions.HostProcess != nil {
-			if *ps.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
+			if pol.HostProcess == false && *ps.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
 				fmt.Printf("Host process does not match in pod security context. Setting it to %v.", pol.HostProcess)
 				*ps.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 			}
@@ -111,7 +111,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 
 	if ps.SecurityContext.SeccompProfile != nil {
 		if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
-			fmt.Printf("Seccomp does not match in pod security context. Setting it to %v. \n", pol.Seccomp[0])
+			fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", pol.Seccomp[0])
 			ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
 		}
 	}
@@ -132,7 +132,7 @@ func assessPrivileged(containers []corev1.Container, pol policy.Policy) ([]corev
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.Privileged != nil {
-			if *container.SecurityContext.Privileged != pol.Privileged {
+			if pol.Privileged == false && *container.SecurityContext.Privileged != pol.Privileged {
 				fmt.Printf("Privileged does not match in container %v. Setting it to %v.\n", container.Name, pol.Privileged)
 				*container.SecurityContext.Privileged = pol.Privileged
 			}
@@ -148,7 +148,7 @@ func assessHostProcess(containers []corev1.Container, pol policy.Policy) ([]core
 		}
 		if container.SecurityContext.WindowsOptions != nil {
 			if container.SecurityContext.WindowsOptions.HostProcess != nil {
-				if *container.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
+				if pol.HostProcess == false && *container.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
 					fmt.Printf("HostProcess does not match in container %v. Setting it to %v.\n", container.Name, pol.HostProcess)
 					*container.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 				}
@@ -167,10 +167,10 @@ func assessCapabilities(containers []corev1.Container, pol policy.Policy) ([]cor
 			if container.SecurityContext.Capabilities.Add != nil {
 				newCapabilities := []corev1.Capability{}
 				for _,capability := range(container.SecurityContext.Capabilities.Add) {
-					if utils.ContainsValue(pol.Capabilities, string(capability)) {
+					if utils.ContainsValue(pol.Capabilities, "*") || utils.ContainsValue(pol.Capabilities, string(capability)) {
 						newCapabilities = append(newCapabilities, capability)
 					} else {
-						fmt.Printf("Droped capability: %v in container %v.\n", string(capability), container.Name)
+						fmt.Printf("Dropped capability: %v in container %v.\n", string(capability), container.Name)
 					}
 				}
 				container.SecurityContext.Capabilities.Add = newCapabilities
@@ -186,7 +186,7 @@ func assessProcMount(containers []corev1.Container, pol policy.Policy) ([]corev1
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.ProcMount != nil {
-			if *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) {
+			if  *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) {
 				fmt.Println("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount)
 				*container.SecurityContext.ProcMount  = corev1.ProcMountType(pol.ProcMount) 
 			}
@@ -202,7 +202,7 @@ func assessSeccomp(containers []corev1.Container, pol policy.Policy) ([]corev1.C
 		}
 		if container.SecurityContext.SeccompProfile != nil {
 			if !utils.ContainsValue(pol.Seccomp, string(container.SecurityContext.SeccompProfile.Type)) {
-				fmt.Println("Seccomp does not match in container %v. Setting it to %v.\n", container.Name, pol.Seccomp[0])
+				fmt.Println("Seccomp profile not allowed in container %v. Setting it to %v.\n", container.Name, pol.Seccomp[0])
 				container.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
 			}
 		

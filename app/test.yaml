@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-web-app
+  labels:
+    app: sample-web-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sample-web-app
+  template:
+    metadata:
+      labels:
+        app: sample-web-app
+    spec:
+      hostNetwork: true
+      securityContext:
+        runAsUser: 1000
+        windowsOptions:
+            hostProcess: true
+      initContainers:                    # Add initContainers section here
+      - name: init-container             # Name of the init container
+        image: busybox:1.32.0            # Image for the init container
+        command: ["sh", "-c", "echo Init Container is running"]  # Command for the init container
+        securityContext:
+          privileged: true
+      containers:
+      - name: web
+        image: your-docker-username/sample-web-app:latest
+        ports:
+        - containerPort: 80
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["CHOWN", "NET_ADMIN"]
+      - name: web222
+        image: your-docker-username/test:latest
+        ports:
+        - containerPort: 811
+        securityContext:
+          privileged: false
+          windowsOptions:
+            hostProcess: true

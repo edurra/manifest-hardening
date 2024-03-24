@@ -15,28 +15,28 @@ func GenerateHardenedObject(obj runtime.Object, gVK *schema.GroupVersionKind, po
 
 	var newObject runtime.Object
 
-    switch gVK.Kind {
-    case "Deployment":
-        deployment, ok := obj.(*appsv1.Deployment)
-        if !ok {
-            return obj, errors.New("Error, could't assert the Deployment object")
-        }
-        newObject = deployment.DeepCopy()
-        podSpec := &newObject.(*appsv1.Deployment).Spec.Template.Spec
-        *podSpec = evaluatePodSpec(*podSpec, pol)
+	switch gVK.Kind {
+	case "Deployment":
+		deployment, ok := obj.(*appsv1.Deployment)
+		if !ok {
+			return obj, errors.New("Error, could't assert the Deployment object")
+		}
+		newObject = deployment.DeepCopy()
+		podSpec := &newObject.(*appsv1.Deployment).Spec.Template.Spec
+		*podSpec = evaluatePodSpec(*podSpec, pol)
 
-    case "Pod":
-        pod, ok := obj.(*corev1.Pod)
-        if !ok {
+	case "Pod":
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
 			return obj, errors.New("Error, could't assert the Pod object") 
-        }
-        newObject = pod.DeepCopy() 
-        podSpec := &newObject.(*corev1.Pod).Spec
-        *podSpec = evaluatePodSpec(*podSpec, pol)
+		}
+		newObject = pod.DeepCopy() 
+		podSpec := &newObject.(*corev1.Pod).Spec
+		*podSpec = evaluatePodSpec(*podSpec, pol)
 
-    default:
-        return obj, errors.New("Error, unkown resource kind")
-    }
+	default:
+		return obj, errors.New("Error, unkown resource kind")
+	}
 
 	return newObject, nil
 }
@@ -65,8 +65,8 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	if ps.Volumes != nil {
 		newVolumes := []corev1.Volume{}
 		for _, volume := range(ps.Volumes) {
-			if volume.HostPath != nil && pol.HostPath == false {
-				fmt.Printf("HostPath Volume detected. It has been deleted.\n")
+			if utils.VolumeIsDisallowed(volume, pol.DisallowedVolumes) || (!utils.VolumeIsAllowed(volume, pol.AllowedVolumes)) {
+				fmt.Printf("%s Volume not allowed. It has been deleted.\n", volume.Name)
 			} else {
 				newVolumes = append(newVolumes, volume)
 			}
@@ -78,7 +78,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	if ps.SecurityContext.WindowsOptions != nil {
 		if ps.SecurityContext.WindowsOptions.HostProcess != nil {
 			if pol.HostProcess == false && *ps.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
-				fmt.Printf("Host process does not match in pod security context. Setting it to %v.", pol.HostProcess)
+				fmt.Printf("Host process does not match in pod security context. Setting it to %v.\n", pol.HostProcess)
 				*ps.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 			}
 		}
@@ -111,8 +111,15 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 
 	if ps.SecurityContext.SeccompProfile != nil {
 		if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
-			fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", pol.Seccomp[0])
-			ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
+			fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", "Default")
+			ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
+		}
+	} else {
+		if !utils.ContainsValue(pol.Seccomp, "Undefined") {
+			fmt.Printf("Seccomp in pod security context is undefined. Setting it to %v. \n", "Default")
+			ps.SecurityContext.SeccompProfile = &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileType("Default"),
+			}
 		}
 	}
 
@@ -120,6 +127,50 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 
 	if ps.InitContainers != nil {
 		ps.InitContainers = assessSeccomp(ps.InitContainers, pol)
+	}
+
+	ps.Containers = assessAllowPrivilegeEscalation(ps.Containers, pol)
+
+	if ps.InitContainers != nil {
+		ps.InitContainers = assessAllowPrivilegeEscalation(ps.InitContainers, pol)
+	}
+
+	if pol.RunAsNonRoot == true {
+		if ps.SecurityContext.RunAsNonRoot == nil {
+			ps.SecurityContext.RunAsNonRoot = new(bool)
+			*ps.SecurityContext.RunAsNonRoot = true
+			fmt.Println("Pod RunAsNonRoot does not match. It was modified.")
+		}
+		if *ps.SecurityContext.RunAsNonRoot == false {
+			*ps.SecurityContext.RunAsNonRoot = true
+			fmt.Println("Pod RunAsNonRoot does not match. It was modified.")
+		}
+	}
+
+	ps.Containers = assessRunAsNonRoot(ps.Containers, pol)
+
+	if ps.InitContainers != nil {
+		ps.InitContainers = assessRunAsNonRoot(ps.InitContainers, pol)
+	}
+
+	user := utils.RandomUser()
+	if pol.RunAsUser == true {
+		if ps.SecurityContext.RunAsUser == nil {
+			ps.SecurityContext.RunAsUser = new(int64)
+			*ps.SecurityContext.RunAsUser = user
+			fmt.Println("RunAsUser does not match for pod. Assigning random user value.")
+		} else {
+			if *ps.SecurityContext.RunAsUser == 0 {
+				*ps.SecurityContext.RunAsUser = user
+				fmt.Println("RunAsUser does not match for pod. Assigning random user value.")
+			}
+		}
+	}
+
+	ps.Containers = assessRunAsUser(ps.Containers, pol, user)
+
+	if ps.InitContainers != nil {
+		ps.InitContainers = assessRunAsUser(ps.InitContainers, pol, user)
 	}
 
 	return ps
@@ -202,11 +253,56 @@ func assessSeccomp(containers []corev1.Container, pol policy.Policy) ([]corev1.C
 		}
 		if container.SecurityContext.SeccompProfile != nil {
 			if !utils.ContainsValue(pol.Seccomp, string(container.SecurityContext.SeccompProfile.Type)) {
-				fmt.Println("Seccomp profile not allowed in container %v. Setting it to %v.\n", container.Name, pol.Seccomp[0])
-				container.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType(pol.Seccomp[0])
+				fmt.Printf("Seccomp profile not allowed in container %v. Setting it to %v.\n", container.Name, "Default")
+				container.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
 			}
-		
+		}
+	}
+	return containers
+}
+
+func assessAllowPrivilegeEscalation(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+	for _, container := range(containers) {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &corev1.SecurityContext{}
+		}
+		if container.SecurityContext.AllowPrivilegeEscalation != nil {
+			if pol.AllowPrivilegeEscalation == false && *container.SecurityContext.AllowPrivilegeEscalation != pol.Privileged {
+				fmt.Printf("AllowPrivilegeEscalation does not match in container %v. Setting it to %v.\n", container.Name, pol.AllowPrivilegeEscalation)
+				*container.SecurityContext.AllowPrivilegeEscalation = pol.AllowPrivilegeEscalation
+			}
 		}	
+	}
+	return containers
+}
+
+func assessRunAsNonRoot(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+	for _, container := range(containers) {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &corev1.SecurityContext{}
+		} 
+
+		if pol.RunAsNonRoot == true  && container.SecurityContext.RunAsNonRoot != nil {
+			if *container.SecurityContext.RunAsNonRoot == false {
+				fmt.Printf("RunAsNonRoot does not match in container %v. Setting it to %v.\n", container.Name, pol.RunAsNonRoot)
+				*container.SecurityContext.RunAsNonRoot = pol.RunAsNonRoot
+			}
+		}
+	}
+	return containers
+}
+
+func assessRunAsUser(containers []corev1.Container, pol policy.Policy, user int64) ([]corev1.Container) {
+	for _, container := range(containers) {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &corev1.SecurityContext{}
+		} 
+		if pol.RunAsUser == true  && container.SecurityContext.RunAsUser != nil {
+			if *container.SecurityContext.RunAsUser == 0 {
+				fmt.Printf("RunAsUser does not match in container %v. Setting it to %v.\n", container.Name, user)
+				*container.SecurityContext.RunAsUser = user
+			}
+		}
 	}
 	return containers
 }

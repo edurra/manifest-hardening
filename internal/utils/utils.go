@@ -7,7 +7,9 @@ import (
 	"io/ioutil"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/cli-runtime/pkg/printers"
-    "os"
+	"os"
+	"reflect"
+	"math/rand"
 )
 
 func ReadObject(filepath string)(runtime.Object, *schema.GroupVersionKind, error) {
@@ -46,4 +48,33 @@ func ContainsValue(slice []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func VolumeIsAllowed(volume corev1.Volume, allowedVolumes []string) (bool){
+	allowed := false
+	if ContainsValue(allowedVolumes, "*") {
+		return true
+	}
+
+	for _, avol := range(allowedVolumes) {
+		if !reflect.ValueOf(volume.VolumeSource).FieldByName(avol).IsNil() {
+			allowed = true
+		}
+	}
+	return allowed
+}
+
+func VolumeIsDisallowed(volume corev1.Volume, disallowedVolumes []string) (bool){
+	disallowed := false
+	for _, davol := range(disallowedVolumes) {
+		if !reflect.ValueOf(volume.VolumeSource).FieldByName(davol).IsNil() {
+			disallowed = true
+		}
+	}
+	return disallowed
+}
+
+func RandomUser() (int64) {
+	randNum := rand.Intn(65536)
+	return int64(randNum + 1)
 }

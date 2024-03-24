@@ -13,9 +13,6 @@ spec:
     emptyDir: {}
   hostNetwork: true
   securityContext:
-    runAsUser: 1000
-    seccompProfile:
-      type: Unconfined
     windowsOptions:
       hostProcess: true
   initContainers:
@@ -24,6 +21,9 @@ spec:
     command: ["sh", "-c", "echo Init Container is running"]
     securityContext:
       privileged: true
+      runAsNonRoot: false
+      seccompProfile:
+        type: Unconfined
   containers:
   - name: web
     image: your-docker-username/sample-web-app:latest
@@ -33,6 +33,7 @@ spec:
       privileged: true
       capabilities:
         add: ["CHOWN", "NET_ADMIN"]
+      runAsUser: 100
   - name: web222
     image: your-docker-username/test:latest
     ports:
@@ -41,3 +42,4 @@ spec:
       privileged: false
       windowsOptions:
         hostProcess: true
+      allowPrivilegeEscalation: true

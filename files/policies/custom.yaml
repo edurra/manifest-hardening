@@ -1,0 +1,8 @@
+Privileged: false
+CapabilitiesAdd:
+  - ALL
+DisallowedVolumes:
+  - HostPath
+RunAsNonRoot: true
+RunAsUser: true
+ProcMount: Default

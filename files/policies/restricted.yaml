@@ -1,0 +1,27 @@
+HostPID: false
+HostNetwork: false
+HostIPC: false
+Privileged: false
+HostProcess: false
+CapabilitiesAdd:
+  - NET_BIND_SERVICE
+CapabilitiesDrop:
+  - ALL
+ProcMount: Default
+Seccomp:
+  - RuntimeDefault
+  - Localhost
+DisallowedVolumes:
+  - HostPath
+AllowedVolumes:
+  - ConfigMap
+  - CSI
+  - DownwardAPI
+  - EmptyDir
+  - Ephemeral
+  - PersistentVolumeClaim
+  - Projected
+  - Secret
+AllowPrivilegeEscalation: false
+RunAsNonRoot: true
+RunAsUser: true

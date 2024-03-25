@@ -78,3 +78,29 @@ func RandomUser() (int64) {
 	randNum := rand.Intn(65536)
 	return int64(randNum + 1)
 }
+
+func CapabilityInList(caps []corev1.Capability, c string) (bool) {
+	for _, cap := range(caps) {
+		if string(cap) == c {
+			return true
+		}
+	}
+	return false
+}
+
+func CapabilititesEqual(c1 []corev1.Capability, c2 []corev1.Capability) (bool) {
+	for i, c := range(c1) {
+		if string(c) != string(c2[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func CapabilititesToString(caps []corev1.Capability) ([]string) {
+	result := []string{}
+	for _, c := range(caps) {
+		result = append(result, string(c))
+	}
+	return result
+}

@@ -6,7 +6,8 @@ type Policy struct {
 	HostIPC bool // if true, both "true" and "false" are allowed. If "false", only "false" is allowed
 	Privileged bool // if true, both "true" and "false" are allowed. If "false", only "false" is allowed
 	HostProcess bool // if true, both "true" and "false" are allowed. If "false", only "false" is allowed
-	Capabilities []string // only included values are allowed, * can be included
+	CapabilitiesAdd []string // only included values are allowed, ALL can be included
+	CapabilitiesDrop []string // included values are disallowed, ALL can be included
 	ProcMount string // this value is the only one allowed
 	Seccomp []string // only values included are allowed. Need to add "Undefined" if empty seccomp profiles are allowed
 	AllowedVolumes []string // only included values are allowed, * can be included

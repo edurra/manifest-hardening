@@ -1,0 +1,32 @@
+HostPID: false
+HostNetwork: false
+HostIPC: false
+Privileged: false
+HostProcess: false
+CapabilitiesAdd:
+  - AUDIT_WRITE
+  - CHOWN
+  - DAC_OVERRIDE
+  - FOWNER
+  - FSETID
+  - KILL
+  - MKNOD
+  - NET_BIND_SERVICE
+  - SETFCAP
+  - SETGID
+  - SETPCAP
+  - SETUID
+  - SYS_CHROOT
+CapabilitiesDrop: []
+ProcMount: Default
+Seccomp:
+  - RuntimeDefault
+  - Localhost
+  - Undefined
+DisallowedVolumes:
+  - HostPath
+AllowedVolumes:
+  - "*"
+AllowPrivilegeEscalation: true
+RunAsNonRoot: false
+RunAsUser: false

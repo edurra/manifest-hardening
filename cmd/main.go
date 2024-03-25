@@ -7,60 +7,64 @@ import (
 	"fmt"
 	"flag"
 	"os"
+	"github.com/spf13/viper"
 )
 
 func Run() {
 
 	inputFile := flag.String("input", "", "input manifest")
 	outputFile := flag.String("output", "", "output manifest")
-	pol := flag.String("policy", "", "policy {baseline}")
+	pol := flag.String("policy", "", "path to the policy config file")
 
 	flag.Parse()
 
-	if *inputFile == "" || *outputFile == "" {
-		fmt.Println("Error: Missing required flag")
+	if *inputFile == "" {
+		fmt.Println("Error: Missing required flag (inputFile)")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if *pol != "baseline"  && *pol != "restricted" {
-		fmt.Println("Error: Missing policy")
+	if *outputFile == "" {
+		fmt.Println("Error: Missing required flag (outputFile)")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	policies := map[string]policy.Policy{
-		"baseline": policy.Policy{
-			HostPID: false,
-			HostNetwork: false,
-			HostIPC: false,
-			Privileged: false,
-			HostProcess: false,
-			Capabilities: []string{"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"},
-			ProcMount: "Default",
-			Seccomp: []string{"RuntimeDefault", "Localhost", "Undefined"},
-			DisallowedVolumes: []string{"HostPath"},
-			AllowedVolumes: []string{"*"},
-			AllowPrivilegeEscalation: true,
-			RunAsNonRoot: false,
-			RunAsUser: false,
-		},
-		"restricted": policy.Policy{
-			HostPID: false,
-			HostNetwork: false,
-			HostIPC: false,
-			Privileged: false,
-			HostProcess: false,
-			Capabilities: []string{"AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "MKNOD", "NET_BIND_SERVICE", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT"},
-			ProcMount: "Default",
-			Seccomp: []string{"RuntimeDefault", "Localhost"},
-			DisallowedVolumes: []string{"HostPath"},
-			AllowedVolumes: []string{"ConfigMap", "CSI", "DownwardAPI", "EmptyDir", "Ephemeral", "PersistentVolumeClaim", "Projected", "Secret"},
-			AllowPrivilegeEscalation: false,
-			RunAsNonRoot: true,
-			RunAsUser: true,
-		},
+	if *pol == "" {
+		fmt.Println("Error: Missing required flag (policy)")
+		flag.Usage()
+		os.Exit(1)
 	}
+
+	viper.SetConfigName("config")
+	viper.SetConfigFile(*pol)
+	viper.SetConfigType("yml")
+
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Printf("Error reading config file, %s", err)
+	}
+
+	var pol_cfg policy.Policy
+
+	viper.SetDefault("HostPID", true)
+	viper.SetDefault("HostNetwork", true)
+	viper.SetDefault("HostIPC", true)
+	viper.SetDefault("Privileged", true)
+	viper.SetDefault("HostProcess", true)
+	viper.SetDefault("CapabilitiesAdd", []string{"ALL"})
+	viper.SetDefault("CapabilitiesDrop", []string{})
+	viper.SetDefault("ProcMount", "")
+	viper.SetDefault("Seccomp", []string{"Undefined"})
+	viper.SetDefault("AllowedVolumes", []string{"*"})
+	viper.SetDefault("DisAllowedVolumes", []string{})
+	viper.SetDefault("AllowPrivilegeEscalation", true)
+	viper.SetDefault("RunAsNonRoot", false)
+	viper.SetDefault("RunAsUser", false)
+
+	if err := viper.Unmarshal(&pol_cfg); err != nil {
+        fmt.Println("Error unmarshaling config file:", err)
+        return
+    }
 
 	obj, gKV, err := utils.ReadObject(*inputFile)
 
@@ -69,7 +73,7 @@ func Run() {
 	}
 
 	
-	newObject, err := generator.GenerateHardenedObject(obj, gKV, policies[*pol])
+	newObject, err := generator.GenerateHardenedObject(obj, gKV, pol_cfg)
 
 	if err == nil {
 		utils.WriteObject(*outputFile, newObject)

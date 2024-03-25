@@ -16,26 +16,26 @@ func GenerateHardenedObject(obj runtime.Object, gVK *schema.GroupVersionKind, po
 	var newObject runtime.Object
 
 	switch gVK.Kind {
-	case "Deployment":
-		deployment, ok := obj.(*appsv1.Deployment)
-		if !ok {
-			return obj, errors.New("Error, could't assert the Deployment object")
-		}
-		newObject = deployment.DeepCopy()
-		podSpec := &newObject.(*appsv1.Deployment).Spec.Template.Spec
-		*podSpec = evaluatePodSpec(*podSpec, pol)
+		case "Deployment":
+			deployment, ok := obj.(*appsv1.Deployment)
+			if !ok {
+				return obj, errors.New("Error, could't assert the Deployment object")
+			}
+			newObject = deployment.DeepCopy()
+			podSpec := &newObject.(*appsv1.Deployment).Spec.Template.Spec
+			*podSpec = evaluatePodSpec(*podSpec, pol)
 
-	case "Pod":
-		pod, ok := obj.(*corev1.Pod)
-		if !ok {
-			return obj, errors.New("Error, could't assert the Pod object") 
-		}
-		newObject = pod.DeepCopy() 
-		podSpec := &newObject.(*corev1.Pod).Spec
-		*podSpec = evaluatePodSpec(*podSpec, pol)
+		case "Pod":
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				return obj, errors.New("Error, could't assert the Pod object") 
+			}
+			newObject = pod.DeepCopy() 
+			podSpec := &newObject.(*corev1.Pod).Spec
+			*podSpec = evaluatePodSpec(*podSpec, pol)
 
-	default:
-		return obj, errors.New("Error, unkown resource kind")
+		default:
+			return obj, errors.New("Error, unkown resource kind")
 	}
 
 	return newObject, nil
@@ -97,10 +97,16 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		ps.InitContainers = assessPrivileged(ps.InitContainers, pol)
 	}
 
-	ps.Containers = assessCapabilities(ps.Containers, pol)
+	ps.Containers = assessCapabilitiesAdd(ps.Containers, pol)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessCapabilities(ps.InitContainers, pol)
+		ps.InitContainers = assessCapabilitiesAdd(ps.InitContainers, pol)
+	}
+
+	ps.Containers = assessCapabilitiesDrop(ps.Containers, pol)
+
+	if ps.InitContainers != nil {
+		ps.InitContainers = assessCapabilitiesDrop(ps.InitContainers, pol)
 	}
 
 	ps.Containers = assessProcMount(ps.Containers, pol)
@@ -109,17 +115,18 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		ps.InitContainers = assessProcMount(ps.InitContainers, pol)
 	}
 
-	if ps.SecurityContext.SeccompProfile != nil {
-		if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
-			fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", "Default")
-			ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
-		}
-	} else {
-		if !utils.ContainsValue(pol.Seccomp, "Undefined") {
+	if !utils.ContainsValue(pol.Seccomp, "Undefined") {
+		if ps.SecurityContext.SeccompProfile != nil {
+			if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
+				fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", "Default")
+				ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
+			}
+		} else {
 			fmt.Printf("Seccomp in pod security context is undefined. Setting it to %v. \n", "Default")
 			ps.SecurityContext.SeccompProfile = &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileType("Default"),
 			}
+			
 		}
 	}
 
@@ -209,25 +216,65 @@ func assessHostProcess(containers []corev1.Container, pol policy.Policy) ([]core
 	return containers
 }
 
-func assessCapabilities(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+
+func assessCapabilitiesAdd(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
-		if container.SecurityContext.Capabilities != nil {
-			if container.SecurityContext.Capabilities.Add != nil {
-				newCapabilities := []corev1.Capability{}
-				for _,capability := range(container.SecurityContext.Capabilities.Add) {
-					if utils.ContainsValue(pol.Capabilities, "*") || utils.ContainsValue(pol.Capabilities, string(capability)) {
-						newCapabilities = append(newCapabilities, capability)
-					} else {
-						fmt.Printf("Dropped capability: %v in container %v.\n", string(capability), container.Name)
-					}
-				}
-				container.SecurityContext.Capabilities.Add = newCapabilities
-			}	
+		if container.SecurityContext.Capabilities == nil {
+			container.SecurityContext.Capabilities = &corev1.Capabilities{
+				Add:  []corev1.Capability{}, 
+				Drop: []corev1.Capability{}, 
+			}
+		} else if container.SecurityContext.Capabilities.Add == nil {
+			container.SecurityContext.Capabilities.Add = []corev1.Capability{}
 		}
+		
+		newCapabilities := []corev1.Capability{}
+		for _,capability := range(container.SecurityContext.Capabilities.Add) {
+			if (utils.ContainsValue(pol.CapabilitiesAdd, "ALL") || utils.ContainsValue(pol.CapabilitiesAdd, string(capability))) {
+				newCapabilities = append(newCapabilities, capability)
+			} else {
+				fmt.Printf("Capability: %v not allowed in container %v.\n", string(capability), container.Name)
+			}
+		}
+		container.SecurityContext.Capabilities.Add = newCapabilities
+		
+		
 	}
+	return containers
+}
+
+func assessCapabilitiesDrop(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+	for _, container := range(containers) {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &corev1.SecurityContext{}
+		}
+
+		if container.SecurityContext.Capabilities == nil {
+			container.SecurityContext.Capabilities = &corev1.Capabilities{
+				Add:  []corev1.Capability{}, 
+				Drop: []corev1.Capability{}, 
+			}
+		} else if container.SecurityContext.Capabilities.Drop == nil {
+			container.SecurityContext.Capabilities.Drop = []corev1.Capability{}
+		}
+		
+		if utils.ContainsValue(pol.CapabilitiesDrop, "ALL") {
+			container.SecurityContext.Capabilities.Drop = []corev1.Capability{"ALL"}
+			fmt.Printf("Dropped all capabilities in container %v.\n", container.Name)
+		} else {
+			for _, capability := range(pol.CapabilitiesDrop) {
+				if !utils.CapabilityInList(container.SecurityContext.Capabilities.Drop, capability) {
+					container.SecurityContext.Capabilities.Drop = append(container.SecurityContext.Capabilities.Drop, corev1.Capability(capability))
+					fmt.Printf("Dropped capability: %v in container %v.\n", string(capability), container.Name)
+				}
+			}
+		}
+		
+	} 
+	
 	return containers
 }
 
@@ -237,8 +284,8 @@ func assessProcMount(containers []corev1.Container, pol policy.Policy) ([]corev1
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.ProcMount != nil {
-			if  *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) {
-				fmt.Println("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount)
+			if  *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) && corev1.ProcMountType(pol.ProcMount) != "" {
+				fmt.Printf("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount)
 				*container.SecurityContext.ProcMount  = corev1.ProcMountType(pol.ProcMount) 
 			}
 		}

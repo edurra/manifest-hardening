@@ -46,7 +46,4 @@ spec:
         image: your-docker-username/test:latest
         ports:
         - containerPort: 811
-        securityContext:
-          privileged: false
-          windowsOptions:
-            hostProcess: true
+        

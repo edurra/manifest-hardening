@@ -10,8 +10,44 @@ import (
 	"os"
 	"reflect"
 	"math/rand"
+	"io"
+	"errors"
+	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
+func ReadFromPipe() (runtime.Object, *schema.GroupVersionKind, error){
+	stat, _ := os.Stdin.Stat()
+
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return &corev1.Pod{}, nil, errors.New("No input provided")
+	}
+
+	data, err := io.ReadAll(os.Stdin)
+	decode := scheme.Codecs.UniversalDeserializer().Decode
+
+	if err != nil {
+		return &corev1.Pod{}, nil, err
+	}
+
+	obj, gKV, err := decode(data, nil, nil)
+	
+	if err != nil {
+		return obj, gKV, err
+	}
+
+	return obj, gKV, nil
+}
+
+func ObjToString(obj runtime.Object) (string, error) {
+	serializer := json.NewSerializerWithOptions(json.DefaultMetaFactory, nil, nil, json.SerializerOptions{Yaml: true})
+
+	yamlBytes, err := runtime.Encode(serializer, obj)
+	if err != nil {
+		return "", err
+	}else {
+		return string(yamlBytes), nil
+	}
+}
 func ReadObject(filepath string)(runtime.Object, *schema.GroupVersionKind, error) {
 	decode := scheme.Codecs.UniversalDeserializer().Decode
 	stream, err := ioutil.ReadFile(filepath)

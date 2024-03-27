@@ -11,54 +11,56 @@ import (
 	"errors"
 )
 
-func GenerateHardenedObject(obj runtime.Object, gVK *schema.GroupVersionKind, pol policy.Policy) (runtime.Object, error) {
+func GenerateHardenedObject(obj runtime.Object, gVK *schema.GroupVersionKind, pol policy.Policy) (runtime.Object, []string, error) {
 
 	var newObject runtime.Object
+	var output []string
 
 	switch gVK.Kind {
 		case "Deployment":
 			deployment, ok := obj.(*appsv1.Deployment)
 			if !ok {
-				return obj, errors.New("Error, could't assert the Deployment object")
+				return obj, output, errors.New("Error, could't assert the Deployment object")
 			}
 			newObject = deployment.DeepCopy()
 			podSpec := &newObject.(*appsv1.Deployment).Spec.Template.Spec
-			*podSpec = evaluatePodSpec(*podSpec, pol)
+			*podSpec, output = evaluatePodSpec(*podSpec, pol)
 
 		case "Pod":
 			pod, ok := obj.(*corev1.Pod)
 			if !ok {
-				return obj, errors.New("Error, could't assert the Pod object") 
+				return obj, output, errors.New("Error, could't assert the Pod object") 
 			}
 			newObject = pod.DeepCopy() 
 			podSpec := &newObject.(*corev1.Pod).Spec
-			*podSpec = evaluatePodSpec(*podSpec, pol)
+			*podSpec, output = evaluatePodSpec(*podSpec, pol)
 
 		default:
-			return obj, errors.New("Error, unkown resource kind")
+			return obj, output, errors.New("Error, unkown resource kind")
 	}
 
-	return newObject, nil
+	return newObject, output, nil
 }
 
-func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
+func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec, []string){
+	var output []string
 
 	if ps.SecurityContext == nil {
 		ps.SecurityContext = &corev1.PodSecurityContext{}
 	}
 
 	if pol.HostPID == false && ps.HostPID != pol.HostPID {
-		fmt.Printf("hostPID does not match. Setting it to %v. \n", pol.HostPID)
+		output = append(output, fmt.Sprintf("hostPID does not match. Setting it to %v. \n", pol.HostPID))
 		ps.HostPID = pol.HostPID
 	}
 
 	if pol.HostNetwork == false && ps.HostNetwork != pol.HostNetwork {
-		fmt.Printf("hostNetwork does not match. Setting it to %v. \n", pol.HostNetwork)
+		output = append(output, fmt.Sprintf("hostNetwork does not match. Setting it to %v. \n", pol.HostNetwork))
 		ps.HostNetwork = pol.HostNetwork
 	}
 
 	if pol.HostIPC == false && ps.HostIPC != pol.HostIPC {
-		fmt.Printf("hostIPC does not match. Setting it to %v. \n", pol.HostIPC)
+		output = append(output, fmt.Sprintf("hostIPC does not match. Setting it to %v. \n", pol.HostIPC))
 		ps.HostIPC = pol.HostIPC
 	}
 
@@ -66,7 +68,7 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		newVolumes := []corev1.Volume{}
 		for _, volume := range(ps.Volumes) {
 			if utils.VolumeIsDisallowed(volume, pol.DisallowedVolumes) || (!utils.VolumeIsAllowed(volume, pol.AllowedVolumes)) {
-				fmt.Printf("%s Volume not allowed. It has been deleted.\n", volume.Name)
+				output = append(output, fmt.Sprintf("%s Volume not allowed. It has been deleted.\n", volume.Name))
 			} else {
 				newVolumes = append(newVolumes, volume)
 			}
@@ -78,51 +80,51 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 	if ps.SecurityContext.WindowsOptions != nil {
 		if ps.SecurityContext.WindowsOptions.HostProcess != nil {
 			if pol.HostProcess == false && *ps.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
-				fmt.Printf("Host process does not match in pod security context. Setting it to %v.\n", pol.HostProcess)
+				output = append(output, fmt.Sprintf("Host process does not match in pod security context. Setting it to %v.\n", pol.HostProcess))
 				*ps.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 			}
 		}
 	}
 
 	// hostProcess can be overwritten at container level
-	ps.Containers = assessHostProcess(ps.Containers, pol)
+	ps.Containers, output = assessHostProcess(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessHostProcess(ps.InitContainers, pol)
+		ps.InitContainers, output = assessHostProcess(ps.InitContainers, pol, output)
 	}
 
-	ps.Containers = assessPrivileged(ps.Containers, pol)
+	ps.Containers, output = assessPrivileged(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessPrivileged(ps.InitContainers, pol)
+		ps.InitContainers, output = assessPrivileged(ps.InitContainers, pol, output)
 	}
 
-	ps.Containers = assessCapabilitiesAdd(ps.Containers, pol)
+	ps.Containers, output = assessCapabilitiesAdd(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessCapabilitiesAdd(ps.InitContainers, pol)
+		ps.InitContainers, output = assessCapabilitiesAdd(ps.InitContainers, pol, output)
 	}
 
-	ps.Containers = assessCapabilitiesDrop(ps.Containers, pol)
+	ps.Containers, output = assessCapabilitiesDrop(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessCapabilitiesDrop(ps.InitContainers, pol)
+		ps.InitContainers, output = assessCapabilitiesDrop(ps.InitContainers, pol, output)
 	}
 
-	ps.Containers = assessProcMount(ps.Containers, pol)
+	ps.Containers, output = assessProcMount(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessProcMount(ps.InitContainers, pol)
+		ps.InitContainers, output = assessProcMount(ps.InitContainers, pol, output)
 	}
 
 	if !utils.ContainsValue(pol.Seccomp, "Undefined") {
 		if ps.SecurityContext.SeccompProfile != nil {
 			if !utils.ContainsValue(pol.Seccomp, string(ps.SecurityContext.SeccompProfile.Type)) {
-				fmt.Printf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", "Default")
+				output = append(output, fmt.Sprintf("Seccomp in pod security context not included in allowed values. Setting it to %v. \n", "Default"))
 				ps.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
 			}
 		} else {
-			fmt.Printf("Seccomp in pod security context is undefined. Setting it to %v. \n", "Default")
+			output = append(output, fmt.Sprintf("Seccomp in pod security context is undefined. Setting it to %v. \n", "Default"))
 			ps.SecurityContext.SeccompProfile = &corev1.SeccompProfile{
 				Type: corev1.SeccompProfileType("Default"),
 			}
@@ -130,34 +132,34 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		}
 	}
 
-	ps.Containers = assessSeccomp(ps.Containers, pol)
+	ps.Containers, output = assessSeccomp(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessSeccomp(ps.InitContainers, pol)
+		ps.InitContainers, output = assessSeccomp(ps.InitContainers, pol, output)
 	}
 
-	ps.Containers = assessAllowPrivilegeEscalation(ps.Containers, pol)
+	ps.Containers, output = assessAllowPrivilegeEscalation(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessAllowPrivilegeEscalation(ps.InitContainers, pol)
+		ps.InitContainers, output = assessAllowPrivilegeEscalation(ps.InitContainers, pol, output)
 	}
 
 	if pol.RunAsNonRoot == true {
 		if ps.SecurityContext.RunAsNonRoot == nil {
 			ps.SecurityContext.RunAsNonRoot = new(bool)
 			*ps.SecurityContext.RunAsNonRoot = true
-			fmt.Println("Pod RunAsNonRoot does not match. It was modified.")
+			output = append(output, fmt.Sprintf("Pod RunAsNonRoot does not match. It was modified."))
 		}
 		if *ps.SecurityContext.RunAsNonRoot == false {
 			*ps.SecurityContext.RunAsNonRoot = true
-			fmt.Println("Pod RunAsNonRoot does not match. It was modified.")
+			output = append(output, fmt.Sprintf("Pod RunAsNonRoot does not match. It was modified."))
 		}
 	}
 
-	ps.Containers = assessRunAsNonRoot(ps.Containers, pol)
+	ps.Containers, output = assessRunAsNonRoot(ps.Containers, pol, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessRunAsNonRoot(ps.InitContainers, pol)
+		ps.InitContainers, output = assessRunAsNonRoot(ps.InitContainers, pol, output)
 	}
 
 	user := utils.RandomUser()
@@ -165,41 +167,41 @@ func evaluatePodSpec(ps corev1.PodSpec, pol policy.Policy) (corev1.PodSpec){
 		if ps.SecurityContext.RunAsUser == nil {
 			ps.SecurityContext.RunAsUser = new(int64)
 			*ps.SecurityContext.RunAsUser = user
-			fmt.Println("RunAsUser does not match for pod. Assigning random user value.")
+			output = append(output, fmt.Sprintf("RunAsUser does not match for pod. Assigning random user value."))
 		} else {
 			if *ps.SecurityContext.RunAsUser == 0 {
 				*ps.SecurityContext.RunAsUser = user
-				fmt.Println("RunAsUser does not match for pod. Assigning random user value.")
+				output = append(output, fmt.Sprintf("RunAsUser does not match for pod. Assigning random user value."))
 			}
 		}
 	}
 
-	ps.Containers = assessRunAsUser(ps.Containers, pol, user)
+	ps.Containers, output = assessRunAsUser(ps.Containers, pol, user, output)
 
 	if ps.InitContainers != nil {
-		ps.InitContainers = assessRunAsUser(ps.InitContainers, pol, user)
+		ps.InitContainers, output = assessRunAsUser(ps.InitContainers, pol, user, output)
 	}
 
-	return ps
+	return ps, output
 }
 
 
-func assessPrivileged(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessPrivileged(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.Privileged != nil {
 			if pol.Privileged == false && *container.SecurityContext.Privileged != pol.Privileged {
-				fmt.Printf("Privileged does not match in container %v. Setting it to %v.\n", container.Name, pol.Privileged)
+				output = append(output, fmt.Sprintf("Privileged does not match in container %v. Setting it to %v.\n", container.Name, pol.Privileged))
 				*container.SecurityContext.Privileged = pol.Privileged
 			}
 		}	
 	}
-	return containers
+	return containers, output
 }
 
-func assessHostProcess(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessHostProcess(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
@@ -207,17 +209,17 @@ func assessHostProcess(containers []corev1.Container, pol policy.Policy) ([]core
 		if container.SecurityContext.WindowsOptions != nil {
 			if container.SecurityContext.WindowsOptions.HostProcess != nil {
 				if pol.HostProcess == false && *container.SecurityContext.WindowsOptions.HostProcess != pol.HostProcess {
-					fmt.Printf("HostProcess does not match in container %v. Setting it to %v.\n", container.Name, pol.HostProcess)
+					output = append(output, fmt.Sprintf("HostProcess does not match in container %v. Setting it to %v.\n", container.Name, pol.HostProcess))
 					*container.SecurityContext.WindowsOptions.HostProcess = pol.HostProcess
 				}
 			}	
 		}
 	}
-	return containers
+	return containers, output
 }
 
 
-func assessCapabilitiesAdd(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessCapabilitiesAdd(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
@@ -236,17 +238,17 @@ func assessCapabilitiesAdd(containers []corev1.Container, pol policy.Policy) ([]
 			if (utils.ContainsValue(pol.CapabilitiesAdd, "ALL") || utils.ContainsValue(pol.CapabilitiesAdd, string(capability))) {
 				newCapabilities = append(newCapabilities, capability)
 			} else {
-				fmt.Printf("Capability: %v not allowed in container %v.\n", string(capability), container.Name)
+				output = append(output, fmt.Sprintf("Capability: %v not allowed in container %v.\n", string(capability), container.Name))
 			}
 		}
 		container.SecurityContext.Capabilities.Add = newCapabilities
 		
 		
 	}
-	return containers
+	return containers, output
 }
 
-func assessCapabilitiesDrop(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessCapabilitiesDrop(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
@@ -263,67 +265,67 @@ func assessCapabilitiesDrop(containers []corev1.Container, pol policy.Policy) ([
 		
 		if utils.ContainsValue(pol.CapabilitiesDrop, "ALL") {
 			container.SecurityContext.Capabilities.Drop = []corev1.Capability{"ALL"}
-			fmt.Printf("Dropped all capabilities in container %v.\n", container.Name)
+			output = append(output, fmt.Sprintf("Dropped all capabilities in container %v.\n", container.Name))
 		} else {
 			for _, capability := range(pol.CapabilitiesDrop) {
 				if !utils.CapabilityInList(container.SecurityContext.Capabilities.Drop, capability) {
 					container.SecurityContext.Capabilities.Drop = append(container.SecurityContext.Capabilities.Drop, corev1.Capability(capability))
-					fmt.Printf("Dropped capability: %v in container %v.\n", string(capability), container.Name)
+					output = append(output, fmt.Sprintf("Dropped capability: %v in container %v.\n", string(capability), container.Name))
 				}
 			}
 		}
 		
 	} 
 	
-	return containers
+	return containers, output
 }
 
-func assessProcMount(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessProcMount(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.ProcMount != nil {
 			if  *container.SecurityContext.ProcMount != corev1.ProcMountType(pol.ProcMount) && corev1.ProcMountType(pol.ProcMount) != "" {
-				fmt.Printf("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount)
+				output = append(output, fmt.Sprintf("ProcMount does not match in container %v. Setting it to %v.\n", container.Name, pol.ProcMount))
 				*container.SecurityContext.ProcMount  = corev1.ProcMountType(pol.ProcMount) 
 			}
 		}
 	}
-	return containers
+	return containers, output
 }
 
-func assessSeccomp(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessSeccomp(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.SeccompProfile != nil {
 			if !utils.ContainsValue(pol.Seccomp, string(container.SecurityContext.SeccompProfile.Type)) {
-				fmt.Printf("Seccomp profile not allowed in container %v. Setting it to %v.\n", container.Name, "Default")
+				output = append(output, fmt.Sprintf("Seccomp profile not allowed in container %v. Setting it to %v.\n", container.Name, "Default"))
 				container.SecurityContext.SeccompProfile.Type = corev1.SeccompProfileType("Default")
 			}
 		}
 	}
-	return containers
+	return containers, output
 }
 
-func assessAllowPrivilegeEscalation(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessAllowPrivilegeEscalation(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		}
 		if container.SecurityContext.AllowPrivilegeEscalation != nil {
 			if pol.AllowPrivilegeEscalation == false && *container.SecurityContext.AllowPrivilegeEscalation != pol.Privileged {
-				fmt.Printf("AllowPrivilegeEscalation does not match in container %v. Setting it to %v.\n", container.Name, pol.AllowPrivilegeEscalation)
+				output = append(output, fmt.Sprintf("AllowPrivilegeEscalation does not match in container %v. Setting it to %v.\n", container.Name, pol.AllowPrivilegeEscalation))
 				*container.SecurityContext.AllowPrivilegeEscalation = pol.AllowPrivilegeEscalation
 			}
 		}	
 	}
-	return containers
+	return containers, output
 }
 
-func assessRunAsNonRoot(containers []corev1.Container, pol policy.Policy) ([]corev1.Container) {
+func assessRunAsNonRoot(containers []corev1.Container, pol policy.Policy, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
@@ -331,25 +333,25 @@ func assessRunAsNonRoot(containers []corev1.Container, pol policy.Policy) ([]cor
 
 		if pol.RunAsNonRoot == true  && container.SecurityContext.RunAsNonRoot != nil {
 			if *container.SecurityContext.RunAsNonRoot == false {
-				fmt.Printf("RunAsNonRoot does not match in container %v. Setting it to %v.\n", container.Name, pol.RunAsNonRoot)
+				output = append(output, fmt.Sprintf("RunAsNonRoot does not match in container %v. Setting it to %v.\n", container.Name, pol.RunAsNonRoot))
 				*container.SecurityContext.RunAsNonRoot = pol.RunAsNonRoot
 			}
 		}
 	}
-	return containers
+	return containers, output
 }
 
-func assessRunAsUser(containers []corev1.Container, pol policy.Policy, user int64) ([]corev1.Container) {
+func assessRunAsUser(containers []corev1.Container, pol policy.Policy, user int64, output []string) ([]corev1.Container, []string) {
 	for _, container := range(containers) {
 		if container.SecurityContext == nil {
 			container.SecurityContext = &corev1.SecurityContext{}
 		} 
 		if pol.RunAsUser == true  && container.SecurityContext.RunAsUser != nil {
 			if *container.SecurityContext.RunAsUser == 0 {
-				fmt.Printf("RunAsUser does not match in container %v. Setting it to %v.\n", container.Name, user)
+				output = append(output, fmt.Sprintf("RunAsUser does not match in container %v. Setting it to %v.\n", container.Name, user))
 				*container.SecurityContext.RunAsUser = user
 			}
 		}
 	}
-	return containers
+	return containers, output
 }

@@ -8,6 +8,8 @@ import (
 	"flag"
 	"os"
 	"github.com/spf13/viper"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 )
 
 func Run() {
@@ -15,17 +17,12 @@ func Run() {
 	inputFile := flag.String("input", "", "input manifest")
 	outputFile := flag.String("output", "", "output manifest")
 	pol := flag.String("policy", "", "path to the policy config file")
+	verbose := flag.Bool("verbose", false, "path to the policy config file")
 
 	flag.Parse()
 
 	if *inputFile == "" {
 		fmt.Println("Error: Missing required flag (inputFile)")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	if *outputFile == "" {
-		fmt.Println("Error: Missing required flag (outputFile)")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -73,10 +70,34 @@ func Run() {
 	}
 
 	
-	newObject, err := generator.GenerateHardenedObject(obj, gKV, pol_cfg)
+	newObject, output, err := generator.GenerateHardenedObject(obj, gKV, pol_cfg)
 
 	if err == nil {
-		utils.WriteObject(*outputFile, newObject)
+
+		if *verbose {
+			for _, o := range(output) {
+				fmt.Printf(o)
+			}
+			fmt.Println("")
+		}
+
+		if *outputFile == "" {
+			fmt.Println("---")
+
+			serializer := json.NewSerializerWithOptions(json.DefaultMetaFactory, nil, nil, json.SerializerOptions{Yaml: true})
+
+			yamlBytes, err := runtime.Encode(serializer, obj)
+			if err != nil {
+				fmt.Printf("Error encoding object to YAML: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Println(string(yamlBytes))
+			
+		} else {
+			utils.WriteObject(*outputFile, newObject)
+		}
+		
 	} else {
 		fmt.Println(err)
 	}

@@ -8,11 +8,16 @@ To build the binary:
 
 Run it:
 
-`./manifest-hardening -input {inputFile} -output {outputFile} -policy {policyFile}`
+`./manifest-hardening <-input inputFile>  <-policy policyFile> [-output outputFile] [-verbose]`
+
+- `input` (required): path to the input manifest
+- `policy` (required): path of the file containing the policy to use
+- `output` (optional): path to store the output manifest. If not set, it will be printed to console
+- `verbose` (optional): print the changes made to the manifest
 
 Example:
 
-`./manifest-hardening -input files/manifests/deployment.yaml -output files/hardened-manifest.yaml -policy files/policies/restricted.yaml`
+`./manifest-hardening -input files/manifests/deployment.yaml -output files/hardened-manifest.yaml -policy files/policies/restricted.yaml -verbose`
 
 The tool will check for compliance with the specified policy and automatically mutate the required files. The result will be stored in `output`.
 
